@@ -26,8 +26,14 @@ async function run() {
         await client.connect();
 
         const menuCollection = client.db("bistroDB").collection("menu");
+        const reviewsCollection = client.db("bistroDB").collection("reviews");
+
         app.get('/menu', async(req,  res) => {
             const result = await menuCollection.find().toArray();
+            res.send(result)
+        })
+        app.get('/reviews', async(req,  res) => {
+            const result = await reviewsCollection.find().toArray();
             res.send(result)
         })
 
@@ -47,5 +53,5 @@ app.get('/', (req, res) => {
 })
 
 app.listen(port, () => {
-    console.log(`bistro boss is running at: ${port}`)
+    console.log(`BISTRO BOSS IS RUNNING AT PORT: ${port}`)
 })
