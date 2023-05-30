@@ -3,7 +3,9 @@ const app = express();
 const cors = require('cors');
 require('dotenv').config();
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const jwt = require('jsonwebtoken');
 const port = process.env.PORT || 5000;
+
 
 // middleware
 app.use(cors());
@@ -30,57 +32,77 @@ async function run() {
         const menuCollection = client.db("bistroDB").collection("menu");
         const reviewsCollection = client.db("bistroDB").collection("reviews");
         const cartsCollection = client.db("bistroDB").collection("carts");
-        
+
+        app.post('/jwt', (req, res) => {
+            const user = req.body;
+            const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, { expiresIn: '1h' });
+            res.send({token})
+        })
+
         // user related APIs
-        
-        app.get('/users', async(req, res) => {
+
+        app.get('/users', async (req, res) => {
             const result = await usersCollection.find().toArray();
             res.send(result)
         })
 
-        app.post('/users', async(req, res) => {
+        app.post('/users', async (req, res) => {
             const user = req.body;
             console.log(user);
-            const query = {email: user.email};
+            const query = { email: user.email };
             const existingUser = await usersCollection.findOne(query);
-            if(existingUser){
-                return res.send({message: 'user already exists'})
+            if (existingUser) {
+                return res.send({ message: 'user already exists' })
             }
             const result = await usersCollection.insertOne(user);
             res.send(result)
         })
 
+        app.patch('/users/admin/:id', async (req, res) => {
+            const id = req.params.id;
+            const filter = { _id: new ObjectId(id) }
+
+            const updateDoc = {
+                $set: {
+                    role: 'admin'
+                },
+            };
+
+            const result = await usersCollection.updateOne(filter, updateDoc);
+            res.send(result)
+        })
+
         // menu related APIs
-        app.get('/menu', async(req,  res) => {
+        app.get('/menu', async (req, res) => {
             const result = await menuCollection.find().toArray();
             res.send(result)
         })
         // review related APIs
-        app.get('/reviews', async(req,  res) => {
+        app.get('/reviews', async (req, res) => {
             const result = await reviewsCollection.find().toArray();
             res.send(result)
         })
 
         // cart collection APIs
 
-        app.get('/carts', async(req, res) => {
+        app.get('/carts', async (req, res) => {
             const email = req.query.email;
-            if(!email){
+            if (!email) {
                 res.send([])
             }
-            const query = {email: email};
+            const query = { email: email };
             const result = await cartsCollection.find(query).toArray();
-            res.send(result);   
+            res.send(result);
         })
-        app.post('/carts', async(req, res) => {
+        app.post('/carts', async (req, res) => {
             const item = req.body;
             const result = await cartsCollection.insertOne(item);
             res.send(result)
         })
 
-        app.delete('/carts/:id', async(req, res) => {
+        app.delete('/carts/:id', async (req, res) => {
             const id = req.params.id;
-            const query = {_id: new ObjectId(id)};
+            const query = { _id: new ObjectId(id) };
             const result = await cartsCollection.deleteOne(query);
             res.send(result);
         })
