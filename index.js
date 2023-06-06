@@ -3,7 +3,7 @@ const app = express();
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const stripe = require('stripe')(process.env.PAYMENT_SECRET_KEY);
 const port = process.env.PORT || 5000;
 
 
@@ -27,6 +27,7 @@ const verifyJWT = (req, res, next) => {
     })
 }
 
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const uri = `mongodb+srv://${process.env.USER_DB}:${process.env.USER_PASS}@cluster0.jvx2mqj.mongodb.net/?retryWrites=true&w=majority`;
 
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
@@ -47,6 +48,7 @@ async function run() {
         const menuCollection = client.db("bistroDB").collection("menu");
         const reviewsCollection = client.db("bistroDB").collection("reviews");
         const cartsCollection = client.db("bistroDB").collection("carts");
+        const paymentsCollection = client.db("bistroDB").collection("payments");
 
         app.post('/jwt', (req, res) => {
             const user = req.body;
@@ -74,7 +76,7 @@ async function run() {
          * 3. use verifyAdmin middleware
          */
 
-        // user related APIs
+        // user related APIs----------------------
         app.get('/users', verifyJWT, verifyAdmin, async (req, res) => {
             const result = await usersCollection.find().toArray();
             res.send(result)
@@ -124,7 +126,7 @@ async function run() {
             res.send(result)
         })
 
-        // menu related APIs
+        // menu related APIs----------------------
         app.get('/menu', async (req, res) => {
             const result = await menuCollection.find().toArray();
             res.send(result)
@@ -136,20 +138,20 @@ async function run() {
             res.send(result);
         })
 
-        app.delete('/menu/:id', verifyJWT, verifyAdmin, async(req, res) => {
+        app.delete('/menu/:id', verifyJWT, verifyAdmin, async (req, res) => {
             const id = req.params.id;
-            const query = {_id: new ObjectId(id)};
+            const query = { _id: new ObjectId(id) };
             const result = await menuCollection.deleteOne(query);
             res.send(result)
         })
 
-        // review related APIs
+        // review related APIs--------------------
         app.get('/reviews', async (req, res) => {
             const result = await reviewsCollection.find().toArray();
             res.send(result)
         })
 
-        // cart collection APIs
+        // cart collection APIs-------------------
 
         app.get('/carts', verifyJWT, async (req, res) => {
             const email = req.query.email;
@@ -177,6 +179,87 @@ async function run() {
             const query = { _id: new ObjectId(id) };
             const result = await cartsCollection.deleteOne(query);
             res.send(result);
+        })
+
+        // create payment intent------------------
+        app.post('/create-payment-intent', verifyJWT, async (req, res) => {
+            const { price } = req.body;
+            const amount = price * 100;
+
+            const paymentIntent = await stripe.paymentIntents.create({
+                amount: amount,
+                currency: 'usd',
+                payment_method_types: ['card']
+            });
+            res.send({
+                clientSecret: paymentIntent.client_secret
+            })
+        })
+
+        // payment related api-------------------
+
+        app.post('/payments', verifyJWT, async (req, res) => {
+            const payment = req.body;
+            const insertResult = await paymentsCollection.insertOne(payment);
+
+            const query = { _id: { $in: payment.cartItems.map((id) => new ObjectId(id)) } }
+            const deleteResult = await cartsCollection.deleteMany(query);
+
+            res.send({ insertResult, deleteResult });
+        })
+
+        // admin stats----------------------------
+        app.get('/admin-stats', verifyJWT, verifyAdmin, async (req, res) => {
+            const users = await usersCollection.estimatedDocumentCount();
+            const products = await menuCollection.estimatedDocumentCount();
+            const orders = await paymentsCollection.estimatedDocumentCount();
+
+            // best way to get sum of the price field is to use group and operator
+            /* 
+            await paymentsCollection.aggregate([
+                {
+                    $group: {
+                        _id: null,
+                        total: {$sum: '$price'}
+                    }
+                }
+            ]).toArray() */
+
+            const payments = await paymentsCollection.find().toArray();
+            const revenue = payments.reduce((sum, payment) => sum + payment.price, 0)
+            res.send({
+                users,
+                products,
+                orders,
+                revenue,
+            });
+        })
+
+        app.get('/order-stats', verifyJWT, verifyAdmin, async (req, res) => {
+            const pipeline = [
+                {
+                    $lookup: {
+                        from: 'menu',
+                        localField: 'menuItems',
+                        foreignField: '_id',
+                        as: 'menuItemsData'
+                    }
+                },
+                {
+                    $unwind: '$menuItemsData'
+                },
+                {
+                    $group: {
+                        _id: '$menuItemsData.category',
+                        count: { $sum: 1 },
+                        total: { $sum: '$menuItemsData.price' }
+                    }
+                }
+            ];
+
+            const result = await paymentsCollection.aggregate(pipeline).toArray()
+            res.send(result);
+
         })
 
         // Send a ping to confirm a successful connection
